@@ -7,8 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 /// Cache that remembers the result for each key.
 #[derive(Debug, Default)]
 pub struct Cache<K, V> {
-    // todo! Build your own cache type.
-    inner: ()
+    inner: Arc<RwLock<HashMap<K, Arc<Mutex<Option<V>>>>>>,
 }
 
 impl<K: Eq + Hash + Clone, V: Clone> Cache<K, V> {
@@ -23,7 +22,40 @@ impl<K: Eq + Hash + Clone, V: Clone> Cache<K, V> {
     /// duplicate the work. That is, `f` should be run only once for each key. Specifically, even
     /// for the concurrent invocations of `get_or_insert_with(key, f)`, `f` is called only once.
     pub fn get_or_insert_with<F: FnOnce(K) -> V>(&self, key: K, f: F) -> V {
-        todo!()
+        let rwlock = Arc::clone(&self.inner);
+        let hashmap = rwlock.read().unwrap();
+        match hashmap.get(&key) {
+            Some(arc) => {
+                let mutex = Arc::clone(arc);
+                let option = &*mutex.lock().unwrap();
+                match option {
+                    Some(value) => value.clone(),
+                    None => unreachable!(),
+                }
+            },
+            None => {
+                drop(hashmap);
+                let mut hashmap = rwlock.write().unwrap();
+                if let Entry::Occupied(entry)= hashmap.entry(key.clone()) {
+                    let mutex = Arc::clone(entry.get());
+                    let option = mutex.lock().unwrap();
+                    if let Some(value) = &*option {
+                        value.clone()
+                    } else {
+                        unreachable!();
+                    }
+                } else {
+                    let mutex = Arc::new(Mutex::new(None));
+                    hashmap.insert(key.clone(), Arc::clone(&mutex));
+                    let mut option = mutex.lock().unwrap();
+                    drop(hashmap);
+                    let value = f(key.clone());
+                    *option = Some(value.clone());
+
+                    value
+                }
+            }
+        }
     }
 }
 

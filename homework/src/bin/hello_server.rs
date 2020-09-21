@@ -5,7 +5,7 @@ use cs492_concur_homework::hello_server::{
 use std::io;
 use std::sync::Arc;
 
-const ADDR: &str = "localhost:7878";
+const ADDR: &str = "localhost:1120";
 
 fn main() -> io::Result<()> {
     // Use a browser that doesn't cache too eagerly so that request is always sent. For example,
