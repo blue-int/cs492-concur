@@ -38,7 +38,12 @@ impl CancellableTcpListener {
     pub fn cancel(&self) -> io::Result<()> {
         // Set the flag first and make a bogus connection to itself to wake up the listener blocked
         // in `accept`. Use `TcpListener::local_addr` and `TcpStream::connect`.
-        todo!()
+        self.is_canceled.store(true, Ordering::Release);
+        let addr = TcpListener::local_addr(&self.inner).unwrap();
+        match TcpStream::connect(addr) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e)
+        }
     }
 
     /// Returns an iterator over the connections being received on this listener.  The returned
@@ -53,7 +58,12 @@ impl<'a> Iterator for Incoming<'a> {
     /// Returns None if the listener is `cancel()`led.
     fn next(&mut self) -> Option<io::Result<TcpStream>> {
         let stream: io::Result<TcpStream> = self.listener.inner.accept().map(|p| p.0);
-        todo!()
+        let is_canceled = self.listener.is_canceled.load(Ordering::Acquire);
+        if is_canceled == true {
+            None
+        } else {
+            Some(stream)
+        }
     }
 }
 
