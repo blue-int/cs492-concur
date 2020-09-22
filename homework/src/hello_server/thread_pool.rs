@@ -96,7 +96,7 @@ impl ThreadPool {
                     Ok(s) => s,
                     Err(_) => break,
                 };
-                println!("Worker {} got a job; executing.", id);
+
                 pool_inner_clone.start_job();
                 x();
                 pool_inner_clone.finish_job();
@@ -130,7 +130,13 @@ impl ThreadPool {
     /// Block the current thread until all jobs in the pool have been executed.  NOTE: This method
     /// has nothing to do with `JoinHandle::join`.
     pub fn join(&self) {
-        self.pool_inner.wait_empty();
+        while let Some(sender) = &self.job_sender {
+            if sender.len() != 0 {
+                self.pool_inner.wait_empty();
+            } else {
+                break;
+            }
+        };
     }
 }
 
