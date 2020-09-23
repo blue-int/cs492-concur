@@ -5,6 +5,8 @@
 # * TESTS: array of test names
 # * RUNNERS: array of "cargo[_asan | _tsan] [--release]"
 
+rustup toolchain update stable nightly
+
 echo_err() {
     echo -e "\033[0;31m\033[1m$@\033[0m" 1>&2
 }
@@ -43,7 +45,7 @@ export -f cargo_tsan
 # Uses global variable TESTS
 run_tests_with() {
     local CARGO=$1; shift
-    $CARGO build $@ 2>/dev/null
+    $CARGO test --no-run $@ 2>/dev/null
 
     local FAILED=0
     for TEST in "${TESTS[@]}"; do
