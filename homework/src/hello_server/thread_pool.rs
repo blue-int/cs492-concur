@@ -96,8 +96,6 @@ impl ThreadPool {
                     Ok(s) => s,
                     Err(_) => break,
                 };
-
-                pool_inner_clone.start_job();
                 x();
                 pool_inner_clone.finish_job();
             });
@@ -123,6 +121,7 @@ impl ThreadPool {
         let job = Job(Box::new(f));
 
         if let Some(job_sender) = &self.job_sender {
+            self.pool_inner.start_job();
             job_sender.send(job).unwrap();
         }
     }
@@ -130,13 +129,7 @@ impl ThreadPool {
     /// Block the current thread until all jobs in the pool have been executed.  NOTE: This method
     /// has nothing to do with `JoinHandle::join`.
     pub fn join(&self) {
-        while let Some(sender) = &self.job_sender {
-            if sender.len() != 0 {
-                self.pool_inner.wait_empty();
-            } else {
-                break;
-            }
-        };
+        self.pool_inner.wait_empty();
     }
 }
 
