@@ -92,9 +92,7 @@ impl<T> Arc<T> {
     #[inline]
     pub fn get_mut(this: &mut Self) -> Option<&mut T> {
         if this.is_unique() {
-            unsafe {
-                Some(&mut (*this.ptr.as_ptr()).data)
-            }
+            unsafe { Some(Self::get_mut_unchecked(this)) }
         } else {
             None
         }
@@ -251,7 +249,7 @@ impl<T: Clone> Arc<T> {
                 &mut (*this.ptr.as_ptr()).data
             }
         } else {
-            unsafe { (*this.ptr.as_ptr()).count.fetch_sub(1, Ordering::Release); }
+            unsafe { (*this.ptr.as_ptr()).count.fetch_sub(1, Ordering::Relaxed); }
             let x = Box::new(ArcInner {
                 count: AtomicUsize::new(1),
                 data: unsafe { (*this.ptr.as_ptr()).data.clone() },
@@ -284,10 +282,8 @@ impl<T> Clone for Arc<T> {
     /// ```
     #[inline]
     fn clone(&self) -> Arc<T> {
-        let mut count = self.inner().count.load(Ordering::Acquire);
-        if count < MAX_REFCOUNT {
-            count += 1;
-            self.inner().count.store(count, Ordering::Release);
+        let count = self.inner().count.fetch_add(1, Ordering::Relaxed);
+        if count != MAX_REFCOUNT {
             Self::from_inner(self.ptr)
         } else {
             panic!();
@@ -330,8 +326,8 @@ impl<T> Drop for Arc<T> {
     /// drop(foo2);   // Prints "dropped!"
     /// ```
     fn drop(&mut self) {
-        let prev = self.inner().count.fetch_sub(1, Ordering::Release);
-        if prev == 1 {
+        if self.inner().count.fetch_sub(1, Ordering::Release) == 1 {
+            self.inner().count.load(Ordering::Acquire);
             let inner = unsafe { Box::from_raw(self.ptr.as_ptr()) };
             drop(inner);
         }
