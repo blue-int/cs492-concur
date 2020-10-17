@@ -153,9 +153,7 @@ impl<T> Arc<T> {
     /// ```
     #[inline]
     pub fn count(this: &Self) -> usize {
-        unsafe {
-            (*this.ptr.as_ptr()).count.load(Ordering::Acquire)
-        }
+        this.inner().count.load(Ordering::Acquire)
     }
 
     #[inline]
@@ -244,20 +242,15 @@ impl<T: Clone> Arc<T> {
     /// ```
     #[inline]
     pub fn make_mut(this: &mut Self) -> &mut T {
-        if this.is_unique() {
-            unsafe {
-                &mut (*this.ptr.as_ptr()).data
-            }
-        } else {
-            unsafe { (*this.ptr.as_ptr()).count.fetch_sub(1, Ordering::Relaxed); }
+        if this.is_unique() == false {
+            this.inner().count.fetch_sub(1, Ordering::Relaxed);
             let x = Box::new(ArcInner {
                 count: AtomicUsize::new(1),
-                data: unsafe { (*this.ptr.as_ptr()).data.clone() },
+                data: this.inner().data.clone(),
             });
             this.ptr = Box::leak(x).into();
-
-            unsafe { &mut (*this.ptr.as_ptr()).data }
         }
+        unsafe { Self::get_mut_unchecked(this) }
     }
 }
 
