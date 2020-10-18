@@ -319,8 +319,7 @@ impl<T> Drop for Arc<T> {
     /// drop(foo2);   // Prints "dropped!"
     /// ```
     fn drop(&mut self) {
-        if self.inner().count.fetch_sub(1, Ordering::Release) == 1 {
-            self.inner().count.load(Ordering::Acquire);
+        if self.inner().count.fetch_sub(1, Ordering::AcqRel) == 1 {
             let inner = unsafe { Box::from_raw(self.ptr.as_ptr()) };
             drop(inner);
         }
