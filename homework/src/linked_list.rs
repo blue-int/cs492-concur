@@ -772,13 +772,7 @@ impl<T> IterMut<'_, T> {
     /// ```
     #[inline]
     pub fn peek_next(&mut self) -> Option<&mut T> {
-        unsafe {
-            if let Some(head) = self.head.as_mut() {
-                Some(&mut head.element)
-            } else {
-                None
-            }
-        }
+        unsafe { self.head.as_mut().map(|node| &mut node.element) }
     }
 }
 
