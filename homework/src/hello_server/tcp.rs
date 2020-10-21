@@ -42,7 +42,7 @@ impl CancellableTcpListener {
         let addr = TcpListener::local_addr(&self.inner).unwrap();
         match TcpStream::connect(addr) {
             Ok(_) => Ok(()),
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     }
 

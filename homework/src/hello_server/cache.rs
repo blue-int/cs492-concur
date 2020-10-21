@@ -32,11 +32,11 @@ impl<K: Eq + Hash + Clone, V: Clone> Cache<K, V> {
                     Some(value) => value.clone(),
                     None => unreachable!(),
                 }
-            },
+            }
             None => {
                 drop(hashmap);
                 let mut hashmap = rwlock.write().unwrap();
-                if let Entry::Occupied(entry)= hashmap.entry(key.clone()) {
+                if let Entry::Occupied(entry) = hashmap.entry(key.clone()) {
                     let mutex = Arc::clone(entry.get());
                     let option = mutex.lock().unwrap();
                     if let Some(value) = &*option {
