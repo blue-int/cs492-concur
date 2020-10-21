@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 /// Cache that remembers the result for each key.
 #[derive(Debug, Default)]
 pub struct Cache<K, V> {
-    inner: Arc<RwLock<HashMap<K, Arc<Mutex<Option<V>>>>>>,
+    inner: RwLock<HashMap<K, Arc<Mutex<Option<V>>>>>,
 }
 
 impl<K: Eq + Hash + Clone, V: Clone> Cache<K, V> {
@@ -22,7 +22,7 @@ impl<K: Eq + Hash + Clone, V: Clone> Cache<K, V> {
     /// duplicate the work. That is, `f` should be run only once for each key. Specifically, even
     /// for the concurrent invocations of `get_or_insert_with(key, f)`, `f` is called only once.
     pub fn get_or_insert_with<F: FnOnce(K) -> V>(&self, key: K, f: F) -> V {
-        let rwlock = Arc::clone(&self.inner);
+        let rwlock = &self.inner;
         let hashmap = rwlock.read().unwrap();
         match hashmap.get(&key) {
             Some(arc) => {
