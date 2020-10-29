@@ -5,7 +5,7 @@
 //! Michael and Scott.  Simple, Fast, and Practical Non-Blocking and Blocking Concurrent Queue
 //! Algorithms.  PODC 1996.  http://dl.acm.org/citation.cfm?id=248106
 
-use core::mem::{self, ManuallyDrop};
+use core::mem::MaybeUninit;
 use core::ptr;
 use core::sync::atomic::Ordering;
 
@@ -30,7 +30,7 @@ struct Node<T> {
     /// For example, the sentinel node in a queue never contains a value: its slot is always empty.
     /// Other nodes start their life with a push operation and contain a value until it gets popped
     /// out. After that such empty nodes get added to the collector for destruction.
-    data: ManuallyDrop<T>,
+    data: MaybeUninit<T>,
 
     next: Atomic<Node<T>>,
 }
@@ -39,10 +39,9 @@ struct Node<T> {
 unsafe impl<T: Send> Sync for Queue<T> {}
 unsafe impl<T: Send> Send for Queue<T> {}
 
-impl<T> Queue<T> {
-    /// Create a new, empty queue.
-    pub fn new() -> Queue<T> {
-        let q = Queue {
+impl<T> Default for Queue<T> {
+    fn default() -> Self {
+        let q = Self {
             head: CachePadded::new(Atomic::null()),
             tail: CachePadded::new(Atomic::null()),
         };
@@ -50,7 +49,7 @@ impl<T> Queue<T> {
         // replace this with `mem::MaybeUninit`.
         #[allow(deprecated)]
         let sentinel = Owned::new(Node {
-            data: unsafe { mem::uninitialized() },
+            data: MaybeUninit::uninit(),
             next: Atomic::null(),
         });
         unsafe {
@@ -61,11 +60,18 @@ impl<T> Queue<T> {
             q
         }
     }
+}
+
+impl<T> Queue<T> {
+    /// Create a new, empty queue.
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Adds `t` to the back of the queue, possibly waking up threads blocked on `pop`.
     pub fn push(&self, t: T, guard: &Guard) {
         let new = Owned::new(Node {
-            data: ManuallyDrop::new(t),
+            data: MaybeUninit::new(t),
             next: Atomic::null(),
         });
         let new = Owned::into_shared(new, guard);
@@ -127,7 +133,7 @@ impl<T> Queue<T> {
             {
                 unsafe {
                     guard.defer_destroy(head);
-                    return Some(ManuallyDrop::into_inner(ptr::read(&next_ref.data)));
+                    return Some(ptr::read(&next_ref.data).assume_init());
                 }
             }
         }
@@ -139,7 +145,7 @@ impl<T> Drop for Queue<T> {
         unsafe {
             let guard = unprotected();
 
-            while let Some(_) = self.try_pop(guard) {}
+            while self.try_pop(guard).is_some() {}
 
             // Destroy the remaining sentinel node.
             let sentinel = self.head.load(Ordering::Relaxed, guard);
