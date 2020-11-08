@@ -37,20 +37,17 @@ impl<'l, T: Ord> Cursor<'l, T> {
     /// Move the cursor to the position of key in the sorted list. If the key is found in the list,
     /// return `true`.
     fn find(&mut self, key: &T) -> bool {
-        let ptr = *self.0;
-        if ptr.is_null() {
-            return false;
-        }
-
-        let node = unsafe { ptr.as_ref().unwrap() };
-
-        if node.data == *key {
-            true
-        } else if node.data > *key {
-            false
+        if let Some(node) = unsafe { (*self.0).as_ref() } {
+            if node.data == *key {
+                true
+            } else if node.data > *key {
+                false
+            } else {
+                self.0 = node.next.lock().unwrap();
+                Self::find(self, key)
+            }
         } else {
-            self.0 = node.next.lock().unwrap();
-            Self::find(self, key)
+            false
         }
     }
 }
@@ -73,8 +70,7 @@ impl<T: Ord> OrderedListSet<T> {
 
     /// Returns `true` if the set contains the key.
     pub fn contains(&self, key: &T) -> bool {
-        let (result, _) = self.find(key);
-        result
+        self.find(key).0
     }
 
     /// Insert a key to the set. If the set already has the key, return the provided key in `Err`.
@@ -144,8 +140,7 @@ impl<'l, T> Iterator for Iter<'l, T> {
     fn next(&mut self) -> Option<Self::Item> {
         let guard = self.0.as_ref().unwrap();
         if let Some(node) = unsafe { (*guard).as_ref() } {
-            let next_guard = node.next.lock().unwrap();
-            self.0 = Some(next_guard);
+            self.0 = Some(node.next.lock().unwrap());
             Some(&node.data)
         } else {
             self.0 = None;
