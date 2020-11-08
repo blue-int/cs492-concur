@@ -156,7 +156,12 @@ impl<'l, T> Iterator for Iter<'l, T> {
 
 impl<T> Drop for OrderedListSet<T> {
     fn drop(&mut self) {
-        // todo!()
+        let mut next = *self.head.get_mut().unwrap();
+        while !next.is_null() {
+            let node = unsafe { Box::from_raw(next) };
+            next = node.next.into_inner().unwrap();
+        }
+        drop(next);
     }
 }
 
