@@ -75,51 +75,24 @@ impl<T: Ord> OrderedListSet<T> {
 
     /// Insert a key to the set. If the set already has the key, return the provided key in `Err`.
     pub fn insert(&self, key: T) -> Result<(), T> {
-        unsafe {
-            let mut prev_guard = self.head.lock().unwrap();
-            let mut next_guard = prev_guard;
-            loop {
-                if let Some(node) = (*next_guard).as_ref() {
-                    let data = &node.data;
-                    if *data > key {
-                        *next_guard = Node::new(key, *next_guard);
-                        return Ok(());
-                    } else if *data < key {
-                        prev_guard = next_guard;
-                        next_guard = (*(*prev_guard)).next.lock().unwrap();
-                    } else {
-                        return Err(key);
-                    }
-                } else {
-                    *next_guard = Node::new(key, *next_guard);
-                    return Ok(());
-                }
-            }
+        let (result, mut cursor) = self.find(&key);
+        if result == true {
+            Err(key)
+        } else {
+            *cursor.0 = Node::new(key, *cursor.0);
+            Ok(())
         }
     }
 
     /// Remove the key from the set and return it.
     pub fn remove(&self, key: &T) -> Result<T, ()> {
-        unsafe {
-            let mut prev_guard = self.head.lock().unwrap();
-            let mut next_guard = prev_guard;
-            loop {
-                if let Some(node) = (*next_guard).as_ref() {
-                    let data = &node.data;
-                    if *data > *key {
-                        return Err(());
-                    } else if *data < *key {
-                        prev_guard = next_guard;
-                        next_guard = (*(*prev_guard)).next.lock().unwrap();
-                    } else {
-                        let node = Box::from_raw(*next_guard);
-                        *next_guard = *node.next.lock().unwrap();
-                        return Ok(node.data);
-                    }
-                } else {
-                    return Err(());
-                }
-            }
+        let (result, mut cursor) = self.find(&key);
+        if result == true {
+            let node = unsafe { Box::from_raw(*cursor.0) };
+            *cursor.0 = *node.next.lock().unwrap();
+            Ok(node.data)
+        } else {
+            Err(())
         }
     }
 }
