@@ -173,7 +173,31 @@ impl Debug for Segment {
 impl<T> Drop for GrowableArray<T> {
     /// Deallocate segments, but not the individual elements.
     fn drop(&mut self) {
-        println!("drop!")
+        let root_ptr = &self.root;
+        let guard = unsafe { unprotected() };
+        let shared = root_ptr.load(Ordering::Relaxed, guard);
+        let height = shared.tag();
+        fn recursive(seg_ref: &Segment, height: usize) {
+            if height == 0 {
+                return;
+            }
+            unsafe {
+                for index in 0..(1 << SEGMENT_LOGSIZE) {
+                    let raw_ref = seg_ref.get_unchecked(index);
+                    let raw_size = raw_ref.load(Ordering::Relaxed);
+                    let shared = Shared::from_usize(raw_size) as Shared<Segment>;
+                    if shared.is_null() == false {
+                        recursive(shared.deref(), height - 1);
+                        shared.into_owned();
+                    }
+                }
+            }
+        }
+        unsafe {
+            let seg_ref = shared.deref();
+            recursive(seg_ref, height - 1);
+            shared.into_owned();
+        }
     }
 }
 
@@ -202,11 +226,11 @@ impl<T> GrowableArray<T> {
         let index_bits = (64 - index.leading_zeros()) as usize;
         loop {
             let seg = Segment::new();
-            seg[0].store(Shared::into_usize(shared), Ordering::Relaxed);
-            let seg = Owned::new(seg).with_tag(height);
-            shared = match root_ptr.compare_and_set(shared, seg, Ordering::AcqRel, guard) {
+            seg[0].store(Shared::into_usize(shared.with_tag(0)), Ordering::Relaxed);
+            let owned = Owned::new(seg).with_tag(height);
+            shared = match root_ptr.compare_and_set(shared, owned, Ordering::AcqRel, guard) {
                 Ok(n) => n,
-                Err(e) => e.current
+                Err(e) => e.current,
             };
             height = shared.tag();
             max_bits = SEGMENT_LOGSIZE * height;
@@ -228,12 +252,16 @@ impl<T> GrowableArray<T> {
                     shared = Shared::from_usize(raw_size) as Shared<Segment>;
                     if shared.is_null() {
                         shared = Owned::new(Segment::new()).into_shared(guard);
-                        let new_size = Shared::into_usize(shared);
-                        raw_ref.store(new_size, Ordering::Release);
+                        let new_size = shared.into_usize();
+                        let before = raw_ref.compare_and_swap(raw_size, new_size, Ordering::AcqRel);
+                        if before != raw_size {
+                            shared.into_owned();
+                            shared = Shared::from_usize(before);
+                        }
                     }
                 } else {
                     let ptr = &*seg_ref.get_unchecked(seg_index) as *const _ as *const Atomic<T>;
-                    return ptr.as_ref().unwrap()
+                    return ptr.as_ref().unwrap();
                 }
             }
         }
