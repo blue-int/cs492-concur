@@ -173,7 +173,7 @@ impl Debug for Segment {
 impl<T> Drop for GrowableArray<T> {
     /// Deallocate segments, but not the individual elements.
     fn drop(&mut self) {
-        todo!()
+        println!("drop!")
     }
 }
 
@@ -195,6 +195,47 @@ impl<T> GrowableArray<T> {
     /// Returns the reference to the `Atomic` pointer at `index`. Allocates new segments if
     /// necessary.
     pub fn get(&self, mut index: usize, guard: &Guard) -> &Atomic<T> {
-        todo!()
+        let root_ptr = &self.root;
+        let mut shared = Shared::null();
+        let mut height = 1;
+        let mut max_bits;
+        let index_bits = (64 - index.leading_zeros()) as usize;
+        loop {
+            let seg = Segment::new();
+            seg[0].store(Shared::into_usize(shared), Ordering::Relaxed);
+            let seg = Owned::new(seg).with_tag(height);
+            shared = match root_ptr.compare_and_set(shared, seg, Ordering::AcqRel, guard) {
+                Ok(n) => n,
+                Err(e) => e.current
+            };
+            height = shared.tag();
+            max_bits = SEGMENT_LOGSIZE * height;
+            if max_bits >= index_bits {
+                break;
+            }
+            height += 1;
+        }
+        loop {
+            unsafe {
+                let seg_ref = shared.deref();
+                index = index << (64 - max_bits) >> (64 - max_bits);
+                height -= 1;
+                max_bits -= SEGMENT_LOGSIZE;
+                let seg_index = index >> max_bits;
+                if height > 0 {
+                    let raw_ref = seg_ref.get_unchecked(seg_index);
+                    let raw_size = raw_ref.load(Ordering::Acquire);
+                    shared = Shared::from_usize(raw_size) as Shared<Segment>;
+                    if shared.is_null() {
+                        shared = Owned::new(Segment::new()).into_shared(guard);
+                        let new_size = Shared::into_usize(shared);
+                        raw_ref.store(new_size, Ordering::Release);
+                    }
+                } else {
+                    let ptr = &*seg_ref.get_unchecked(seg_index) as *const _ as *const Atomic<T>;
+                    return ptr.as_ref().unwrap()
+                }
+            }
+        }
     }
 }
