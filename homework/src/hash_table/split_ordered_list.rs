@@ -75,20 +75,15 @@ impl<V> SplitOrderedList<V> {
             let ckpt = cursor.clone();
             let mut owned = Owned::new(Node::new(index.reverse_bits(), None::<V>));
             loop {
-                let found;
-                loop {
-                    cursor = ckpt.clone();
-                    if let Ok(r) = cursor.find_harris(&index.reverse_bits(), guard) {
-                        found = r;
-                        break;
-                    }
-                }
-                if found {
-                    break;
+                cursor = ckpt.clone();
+                match cursor.find_harris(&index.reverse_bits(), guard) {
+                    Ok(true) => break,
+                    Ok(false) => (),
+                    _ => continue,
                 }
                 match cursor.insert(owned, guard) {
                     Err(n) => owned = n,
-                    Ok(()) => break,
+                    Ok(_) => break,
                 }
             }
             atomic.store(cursor.curr(), Ordering::Release);
@@ -105,7 +100,7 @@ impl<V> SplitOrderedList<V> {
         key: &usize,
         guard: &'s Guard,
     ) -> (usize, bool, Cursor<'s, usize, Option<V>>) {
-        let size = self.size.load(Ordering::Acquire);
+        let size = self.size.load(Ordering::Relaxed);
         let mut cursor = self.lookup_bucket(size, key.clone() % size, guard);
         loop {
             if let Ok(found) = cursor.find_harris(&(key.reverse_bits() | 1), guard) {
@@ -139,9 +134,9 @@ impl<V> NonblockingMap<usize, V> for SplitOrderedList<V> {
         }
         match cursor.insert(owned, guard) {
             Ok(()) => {
-                let count = self.count.fetch_add(1, Ordering::AcqRel) + 1;
+                let count = self.count.fetch_add(1, Ordering::Relaxed) + 1;
                 if count > size * Self::LOAD_FACTOR {
-                    self.size.compare_and_swap(size, size * 2, Ordering::AcqRel);
+                    self.size.compare_and_swap(size, size * 2, Ordering::Relaxed);
                 }
                 Ok(())
             }
@@ -156,7 +151,7 @@ impl<V> NonblockingMap<usize, V> for SplitOrderedList<V> {
             return Err(());
         }
         if let Ok(Some(value)) = cursor.delete(guard) {
-            self.count.fetch_sub(1, Ordering::AcqRel);
+            self.count.fetch_sub(1, Ordering::Relaxed);
             Ok(value)
         } else {
             Err(())
