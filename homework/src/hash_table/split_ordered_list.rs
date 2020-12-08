@@ -45,8 +45,57 @@ impl<V> SplitOrderedList<V> {
 
     /// Creates a cursor and moves it to the bucket for the given index.  If the bucket doesn't
     /// exist, recursively initializes the buckets.
-    fn lookup_bucket<'s>(&'s self, index: usize, guard: &'s Guard) -> Cursor<'s, usize, Option<V>> {
-        todo!()
+    fn lookup_bucket<'s>(
+        &'s self,
+        size: usize,
+        index: usize,
+        guard: &'s Guard,
+    ) -> Cursor<'s, usize, Option<V>> {
+        fn get_parent(my_bucket: usize, size: usize) -> usize {
+            let mut parent = size;
+            loop {
+                parent = parent >> 1;
+                if parent <= my_bucket {
+                    break;
+                }
+            }
+            parent = my_bucket - parent;
+            return parent;
+        }
+        let atomic = self.buckets.get(index, guard);
+        let shared = atomic.load(Ordering::Acquire, guard);
+        if shared.is_null() {
+            let parent = get_parent(index, size);
+            let mut cursor;
+            if parent == 0 {
+                cursor = self.list.head(guard);
+            } else {
+                cursor = self.lookup_bucket(size, parent, guard);
+            }
+            let ckpt = cursor.clone();
+            let mut owned = Owned::new(Node::new(index.reverse_bits(), None::<V>));
+            loop {
+                let found;
+                loop {
+                    cursor = ckpt.clone();
+                    if let Ok(r) = cursor.find_harris(&index.reverse_bits(), guard) {
+                        found = r;
+                        break;
+                    }
+                }
+                if found {
+                    break;
+                }
+                match cursor.insert(owned, guard) {
+                    Err(n) => owned = n,
+                    Ok(()) => break,
+                }
+            }
+            atomic.store(cursor.curr(), Ordering::Release);
+            cursor
+        } else {
+            unsafe { Cursor::from_raw(atomic, shared.as_raw()) }
+        }
     }
 
     /// Moves the bucket cursor returned from `lookup_bucket` to the position of the given key.
@@ -56,7 +105,13 @@ impl<V> SplitOrderedList<V> {
         key: &usize,
         guard: &'s Guard,
     ) -> (usize, bool, Cursor<'s, usize, Option<V>>) {
-        todo!()
+        let size = self.size.load(Ordering::Acquire);
+        let mut cursor = self.lookup_bucket(size, key.clone() % size, guard);
+        loop {
+            if let Ok(found) = cursor.find_harris(&(key.reverse_bits() | 1), guard) {
+                return (size, found, cursor);
+            }
+        }
     }
 
     fn assert_valid_key(key: usize) {
@@ -67,16 +122,44 @@ impl<V> SplitOrderedList<V> {
 impl<V> NonblockingMap<usize, V> for SplitOrderedList<V> {
     fn lookup<'a>(&'a self, key: &usize, guard: &'a Guard) -> Option<&'a V> {
         Self::assert_valid_key(*key);
-        todo!()
+        let (_, found, cursor) = self.find(key, guard);
+        if found {
+            cursor.lookup().unwrap().as_ref()
+        } else {
+            None
+        }
     }
 
     fn insert(&self, key: &usize, value: V, guard: &Guard) -> Result<(), V> {
         Self::assert_valid_key(*key);
-        todo!()
+        let (size, found, mut cursor) = self.find(key, guard);
+        let owned = Owned::new(Node::new(key.clone().reverse_bits() | 1, Some(value)));
+        if found {
+            return Err(owned.into_box().into_value().unwrap());
+        }
+        match cursor.insert(owned, guard) {
+            Ok(()) => {
+                let count = self.count.fetch_add(1, Ordering::AcqRel) + 1;
+                if count > size * Self::LOAD_FACTOR {
+                    self.size.compare_and_swap(size, size * 2, Ordering::AcqRel);
+                }
+                Ok(())
+            }
+            Err(owned) => Err(owned.into_box().into_value().unwrap()),
+        }
     }
 
     fn delete<'a>(&'a self, key: &usize, guard: &'a Guard) -> Result<&'a V, ()> {
         Self::assert_valid_key(*key);
-        todo!()
+        let (_, found, cursor) = self.find(key, guard);
+        if found == false {
+            return Err(());
+        }
+        if let Ok(Some(value)) = cursor.delete(guard) {
+            self.count.fetch_sub(1, Ordering::AcqRel);
+            Ok(value)
+        } else {
+            Err(())
+        }
     }
 }
