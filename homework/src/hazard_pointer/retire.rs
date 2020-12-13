@@ -33,14 +33,29 @@ impl<'s> Retirees<'s> {
             debug_assert_eq!(align::decompose_tag::<T>(data).1, 0);
             drop(Box::from_raw(data as *mut T))
         }
-
-        todo!()
+        self.inner.push((pointer.with_tag(0).into_usize(), free::<T>));
+        if self.inner.len() > Self::THRESHOLD {
+            self.collect();
+        }
     }
 
     /// Free the pointers that are `retire`d by the current thread and not `protect`ed by any other
     /// threads.
     pub fn collect(&mut self) {
-        todo!()
+        while self.inner.len() > 0 {
+            let (pointer, free) = self.inner.pop().unwrap();
+            let mut found = false;
+            for hazard in self.hazards.all_hazards().iter() {
+                if pointer == *hazard {
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                continue;
+            }
+            unsafe { free(pointer) };
+        }
     }
 }
 
