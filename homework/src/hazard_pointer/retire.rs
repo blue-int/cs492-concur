@@ -1,5 +1,6 @@
 #[cfg(not(feature = "check-loom"))]
 use core::sync::atomic::{fence, Ordering};
+use std::collections::HashSet;
 #[cfg(feature = "check-loom")]
 use loom::sync::atomic::{fence, Ordering};
 
@@ -33,15 +34,19 @@ impl<'s> Retirees<'s> {
             debug_assert_eq!(align::decompose_tag::<T>(data).1, 0);
             drop(Box::from_raw(data as *mut T))
         }
+        fence(Ordering::SeqCst);
         self.inner.push((pointer.with_tag(0).into_usize(), free::<T>));
         if self.inner.len() > Self::THRESHOLD {
             self.collect();
         }
+        fence(Ordering::SeqCst);
     }
 
     /// Free the pointers that are `retire`d by the current thread and not `protect`ed by any other
     /// threads.
     pub fn collect(&mut self) {
+        fence(Ordering::SeqCst);
+        let mut vector = Vec::new();
         while self.inner.len() > 0 {
             let (pointer, free) = self.inner.pop().unwrap();
             let mut found = false;
@@ -52,10 +57,13 @@ impl<'s> Retirees<'s> {
                 }
             }
             if found {
+                vector.push((pointer, free));
                 continue;
             }
             unsafe { free(pointer) };
         }
+        self.inner = vector;
+        fence(Ordering::SeqCst);
     }
 }
 

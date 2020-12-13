@@ -53,6 +53,7 @@ impl LocalHazards {
         if pos == 8 {
             return None;
         }
+        self.occupied.store(bitmap | ((1 << pos) as u8).reverse_bits(), Ordering::Release);
         self.elements[pos].store(data, Ordering::Release);
         Some(pos)
     }
@@ -64,7 +65,7 @@ impl LocalHazards {
     /// This function must be called only by the thread that owns this hazard array. The index must
     /// have been allocated.
     pub unsafe fn dealloc(&self, index: usize) {
-        self.occupied.fetch_sub(1 << index, Ordering::AcqRel);
+        self.occupied.fetch_sub(((1 << index) as u8).reverse_bits(), Ordering::AcqRel);
     }
 
     /// Returns an iterator of hazard pointers (with tags erased).
@@ -172,7 +173,7 @@ impl<'s, T> Shield<'s, T> {
 
 impl<'s, T> Drop for Shield<'s, T> {
     fn drop(&mut self) {
-        // println!("drop!!!");
+        unsafe { self.hazards.dealloc(self.index) };
     }
 }
 
