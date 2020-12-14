@@ -34,12 +34,10 @@ impl<'s> Retirees<'s> {
             debug_assert_eq!(align::decompose_tag::<T>(data).1, 0);
             drop(Box::from_raw(data as *mut T))
         }
-        fence(Ordering::SeqCst);
         self.inner.push((pointer.with_tag(0).into_usize(), free::<T>));
         if self.inner.len() > Self::THRESHOLD {
             self.collect();
         }
-        fence(Ordering::SeqCst);
     }
 
     /// Free the pointers that are `retire`d by the current thread and not `protect`ed by any other
@@ -49,21 +47,13 @@ impl<'s> Retirees<'s> {
         let mut vector = Vec::new();
         while self.inner.len() > 0 {
             let (pointer, free) = self.inner.pop().unwrap();
-            let mut found = false;
-            for hazard in self.hazards.all_hazards().iter() {
-                if pointer == *hazard {
-                    found = true;
-                    break;
-                }
-            }
-            if found {
+            if self.hazards.all_hazards().contains(&pointer) {
                 vector.push((pointer, free));
-                continue;
+            } else {
+                unsafe { free(pointer) };
             }
-            unsafe { free(pointer) };
         }
         self.inner = vector;
-        fence(Ordering::SeqCst);
     }
 }
 

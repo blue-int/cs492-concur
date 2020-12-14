@@ -48,13 +48,13 @@ impl LocalHazards {
     ///
     /// This function must be called only by the thread that owns this hazard array.
     pub unsafe fn alloc(&self, data: usize) -> Option<usize> {
-        let bitmap = self.occupied.load(Ordering::Acquire);        
+        let bitmap = self.occupied.load(Ordering::Relaxed);        
         let pos = bitmap.leading_ones() as usize;
         if pos == 8 {
             return None;
         }
-        self.occupied.store(bitmap | ((1 << pos) as u8).reverse_bits(), Ordering::Release);
-        self.elements[pos].store(data, Ordering::Release);
+        self.occupied.store(bitmap | ((1 << pos) as u8).reverse_bits(), Ordering::Relaxed);
+        self.elements[pos].store(data, Ordering::Relaxed);
         Some(pos)
     }
 
@@ -65,7 +65,7 @@ impl LocalHazards {
     /// This function must be called only by the thread that owns this hazard array. The index must
     /// have been allocated.
     pub unsafe fn dealloc(&self, index: usize) {
-        self.occupied.fetch_sub(((1 << index) as u8).reverse_bits(), Ordering::AcqRel);
+        self.occupied.fetch_sub(((1 << index) as u8).reverse_bits(), Ordering::Relaxed);
     }
 
     /// Returns an iterator of hazard pointers (with tags erased).
@@ -91,8 +91,8 @@ impl Iterator for LocalHazardsIter<'_> {
         if pos == 8 {
             None
         } else {
-            let result = self.hazards.elements[pos].load(Ordering::Acquire);
-            self.occupied &= !((1 << pos) as u8).reverse_bits();
+            let result = self.hazards.elements[pos].load(Ordering::Relaxed);
+            self.occupied ^= ((1 << pos) as u8).reverse_bits();
             Some(result)
         }
     }
@@ -114,16 +114,12 @@ impl<'s, T> Shield<'s, T> {
     ///
     /// This function must be called only by the thread that owns this hazard array.
     pub unsafe fn new(pointer: Shared<T>, hazards: &'s LocalHazards) -> Option<Self> {
-        if let Some(index) = hazards.alloc(pointer.with_tag(0).into_usize()) {
-            Some(Self {
-                data: pointer.into_usize(),
-                hazards,
-                index,
-                _marker: PhantomData
-            })
-        } else {
-            None
-        }
+        hazards.alloc(pointer.with_tag(0).into_usize()).map(|index| Self {
+            data: pointer.into_usize(),
+            hazards,
+            index,
+            _marker: PhantomData
+        })
     }
 
     /// Returns `true` if the pointer is null.
