@@ -44,16 +44,16 @@ impl<'s> Retirees<'s> {
     /// threads.
     pub fn collect(&mut self) {
         fence(Ordering::SeqCst);
-        let mut vector = Vec::new();
-        while self.inner.len() > 0 {
-            let (pointer, free) = self.inner.pop().unwrap();
+        let mut index = 0;
+        while index != self.inner.len() {
+            let (pointer, free) = self.inner[index];
             if self.hazards.all_hazards().contains(&pointer) {
-                vector.push((pointer, free));
+                index += 1;
             } else {
+                self.inner.remove(index);
                 unsafe { free(pointer) };
             }
         }
-        self.inner = vector;
     }
 }
 
